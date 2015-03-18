@@ -9,7 +9,7 @@ This project is a preliminary implementation of the Candidate Indistinguishabili
 Each of the steps necessary for the NC_1 candidate is implemented, but not all of them work completely. 
 Especially the implementation of Multilinear Jigsaw Puzzles is still in the early phases of development and not fully functional.
 
-This project was used to generate the data published in [Idea: Benchmarking Indistinguishability Obfuscation–A Candidate Implementation](http://link.springer.com/chapter/10.1007/978-3-319-15618-7_12).
+This project was used to generate the data published in 'Idea: Benchmarking Indistinguishability Obfuscation–A Candidate Implementation <http://link.springer.com/chapter/10.1007/978-3-319-15618-7_12>'_.
 
 [0] S. Garg, C. Gentry, S. Halevi, M. Raykova, A. Sahai, and B. Waters. "Candidate indistinguishability obfuscation and functional encryption for all circuits." In: Foundations of Computer Science (FOCS), 2013 IEEE 54th Annual Symposium on. IEEE. 2013, pp. 40-49.
 
