@@ -5,58 +5,97 @@
 ### necessary when using setup.py? ###
 
 #include "interrupt.pxi"  # ctrl-c interrupt block support
-#include "stdsage.pxi"  # ctrl-c interrupt block support
 
 #include "cdefs.pxi"
+
+include 'sage/ext/stdsage.pxi'
 
 from gghlite cimport *
 from sage.rings.ring cimport Ring
 from sage.libs.mpfr cimport mpfr_free_cache
+from sage.libs.flint.fmpz cimport fmpz_init, fmpz_init_set_ui, fmpz_clear, fmpz_get_str, fmpz_set_str
 from sage.structure.element cimport ModuleElement, RingElement
 from sage.categories.rings import Rings
-from cpython.mem cimport PyMem_Malloc, PyMem_Free
 
+from sage.libs.flint.fmpz_poly cimport fmpz_poly_init, fmpz_poly_clear, fmpz_poly_set_coeff_fmpz
+
+from sage.rings.finite_rings.integer_mod cimport IntegerMod_gmp
+	
 cdef class Encoded_Element(RingElement):
 	#remove when using setup.py
-	cdef gghlite_enc_t * value
+	cdef gghlite_enc_t value
 	
 	def __cinit__(self):
-		self.value = <gghlite_enc_t *>PyMem_Malloc(sizeof(gghlite_enc_t))
-		if not self.value:
-			raise MemoryError()
-	
-	def __init__(self, parent, x=0):
+		pass
+		
+	def __init__(self, parent, x=0, level=0):
 		RingElement.__init__(self, parent)
+		
+		#later assert that level is smaller than kappa!
+		
+		cdef Encoded_Parent prnt = <Encoded_Parent>parent
+		
 		sig_on()
-		gghlite_enc_init(self.value[0], (<Encoded_Parent>parent).publickey[0])
-		sig_off()
-		sig_on()
-		gghlite_sample(self.value[0], (<Encoded_Parent>parent).publickey[0], 0, (<Encoded_Parent>parent).randstate[0])
+		gghlite_enc_init(self.value, prnt.params)
 		sig_off()
 		
+		cdef int rerand = 0
+
+		cdef fmpz_t tmp_fmpz
+		cdef fmpz_poly_t tmp_fmpz_poly
+		
+		fmpz_poly_init(tmp_fmpz_poly)
+		#todo: change to something more sensible ? (how?^^)
+		fmpz_set_str(tmp_fmpz, x.__repr__(), 10)
+		sig_on()
+		fmpz_poly_set_coeff_fmpz(tmp_fmpz_poly, 0, tmp_fmpz);
+		gghlite_enc_set_gghlite_clr(self.value, prnt.instance, tmp_fmpz_poly, 1, level, rerand, prnt.randstate)
+		sig_off()
+		fmpz_clear(tmp_fmpz)
+		fmpz_poly_clear(tmp_fmpz_poly)
+		
+	cdef Encoded_Element _new_c(self):
+		cdef Encoded_Element x
+		x = PY_NEW(Encoded_Element)
+		x._parent = self._parent
+		gghlite_enc_init(x.value, (<Encoded_Parent>self._parent).params)
+		return x
+
 	def __dealloc__(self):
-		PyMem_Free(self.value)
+		sig_on()
+		gghlite_enc_clear(self.value)
+		sig_off()
 	
 	def _repr_(self):
-		return '--- PLACEHOLDER ---'
+		return 'Encoding'
 		
 	cpdef ModuleElement _add_(self, ModuleElement right):
-		cdef Encoded_Element ret = Encoded_Element(self.parent())
+		cdef Encoded_Element ret
+		ret = self._new_c()
 		sig_on()
-		gghlite_add(ret.value[0], (<Encoded_Parent>self.parent()).publickey[0], self.value[0], (<Encoded_Element>right).value[0])
+		gghlite_enc_add(ret.value, (<Encoded_Parent>self.parent()).params, self.value, (<Encoded_Element>right).value)
 		sig_off()
 		return ret
 	
 	cpdef RingElement _mul_(self, RingElement right):
-		cdef Encoded_Element ret = Encoded_Element(self.parent())
+		cdef Encoded_Element ret
+		ret = self._new_c()
 		sig_on()
-		gghlite_mul(ret.value[0], (<Encoded_Parent>self.parent()).publickey[0], self.value[0], (<Encoded_Element>right).value[0])
+		gghlite_enc_mul(ret.value, (<Encoded_Parent>self.parent()).params, self.value, (<Encoded_Element>right).value)
+		sig_off()
+		return ret
+		
+	cpdef ModuleElement _sub_(self, ModuleElement right):
+		cdef Encoded_Element ret
+		ret = self._new_c()
+		sig_on()
+		gghlite_enc_sub(ret.value, (<Encoded_Parent>self.parent()).params, self.value, (<Encoded_Element>right).value)
 		sig_off()
 		return ret
 		
 	def __nonzero__(self):
 		sig_on()
-		ret = not gghlite_is_zero((<Encoded_Parent>self.parent()).publickey[0], self.value[0])
+		ret = not gghlite_enc_is_zero((<Encoded_Parent>self.parent()).params, self.value)
 		sig_off()
 		return ret
 		
@@ -65,62 +104,70 @@ cdef class Encoded_Element(RingElement):
 	#continue in 1230	
 	
 	#look at __richcmp__ again, some conditions there
-
+	
 cdef class Encoded_Parent(Ring):
 	Element = Encoded_Element
 
-	#remove when using setup.py
+	# remove when using setup.py
 	cdef size_t kappa, lamb
-	cdef gghlite_pk_t * publickey
-	cdef flint_rand_t * randstate
+	cdef fmpz_t p
+	cdef gghlite_params_t params
+	cdef flint_rand_t randstate
+	
+	cdef gghlite_sk_t instance
+	
+	def getP(self):
+		return int(fmpz_get_str(NULL, 10, self.p))
 	
 	def __cinit__(self):
-		self.publickey = <gghlite_pk_t *>PyMem_Malloc(sizeof(gghlite_pk_t))
-		self.randstate = <flint_rand_t *>PyMem_Malloc(sizeof(flint_rand_t))
-		if not self.publickey or not self.randstate:
-			raise MemoryError()
-	
+		fmpz_init(self.p)
+
 	def __init__(self, base, kappa, lamb=20, mp_limb_t seed=0, category=None):
 		print 'super init'
-		#todo: might have to change Rings() to something more specific (see "Implementing the category framework for the parent")
+		# todo: might have to change Rings() to something more specific (see "Implementing the category framework for the parent")
 		Ring.__init__(self, base, category=category or Rings())
 		
-		cdef gghlite_t instance
-		cdef uint64_t flags
+		#cdef gghlite_sk_t instance
+		cdef gghlite_flag_t flags
 		
 		self.kappa = kappa
 		self.lamb = lamb
 		
-		sig_on()
-		flint_randinit_seed(self.randstate[0], seed, 1)
-		sig_off()
+		flint_randinit_seed(self.randstate, seed, 1)
 		
-		#default for now, see gghlite-defs.h for more options
-		flags = 0
+		# see gghlite-defs.h for more options
+		flags = <gghlite_flag_t> (GGHLITE_FLAGS_GDDH_HARD | GGHLITE_FLAGS_VERBOSE | GGHLITE_FLAGS_GOOD_G_INV | GGHLITE_FLAGS_ASYMMETRIC)
+		#flags = flags | GGHLITE_FLAGS_PRIME_G
 		
+		# initialize, get parameters and clear secret parameters
 		sig_on()
-		#initialize, get publickey and clear secret parameters
-		gghlite_init(instance, self.lamb, self.kappa, 1, flags, self.randstate[0])
+		gghlite_init(self.instance, self.lamb, self.kappa, 1, flags, self.randstate)
 		sig_off()
 		print 'gghlite init complete'
+		
 		sig_on()
-		gghlite_pk_ref(self.publickey[0], instance)
+		gghlite_params_ref(self.params, self.instance)
 		sig_off()
-		print 'got public key'
+		print 'got params'
+		
 		sig_on()
-		gghlite_clear(instance, 0)
+		gghlite_sk_get_p(self.instance, self.p)
 		sig_off()
-		print 'gghlite clear complete'
+		#print 'got p value: %i' % self.getP()
+		
+		#sig_on()
+		#gghlite_sk_clear(instance, 0)
+		#sig_off()
+		#print 'gghlite sk clear complete'
 	
 	def __dealloc__(self):
+		fmpz_clear(self.p)
 		sig_on()
-		if self.publickey is not NULL: gghlite_pk_clear(self.publickey[0])
-		if self.randstate is not NULL: flint_randclear(self.randstate[0])
+		gghlite_params_clear(self.params)
+		flint_randclear(self.randstate)
 		mpfr_free_cache()
 		flint_cleanup()
 		sig_off()
-		PyMem_Free(self.publickey)
-		PyMem_Free(self.randstate)
 		pass
 		
 	def _repr_(self):

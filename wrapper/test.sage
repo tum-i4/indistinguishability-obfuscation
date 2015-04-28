@@ -1,17 +1,23 @@
+from operator import mul
+
 load('wrapper.pyx')
-P = Encoded_Parent(QQ, 3)
-a = Encoded_Element(P)
-b = Encoded_Element(P)
 
-print a
-print b
+levels = 5
 
-print a+b
+Enc = Encoded_Parent(QQ, levels)
+Plain = Integers(Enc.getP())
 
-A = Matrix(P, [[P(), P()],[P(), P()]])
-B = Matrix(P, [[P(), P()],[P(), P()]])
+plaintext = [Plain.random_element() for _ in range(levels)]
+result = reduce(mul, plaintext)
 
-print A
-print B
+encoding = [Enc(x, lvl) for x, lvl in zip(plaintext, range(levels))]
 
-print A*B
+value1 = reduce(mul, encoding)
+
+encoded_ones = [Enc(Plain(1), lvl) for lvl in range(1, levels)]
+
+value2 = Enc(result, 0) * reduce(mul, encoded_ones)
+
+maybe_zero = value1-value2
+
+print 'Works: %s' % (not bool(maybe_zero))
